@@ -21,7 +21,7 @@
 
 		#buttonContainer {
 			position: absolute;
-			top: 10px;
+			top: 20px;
 			left: 10px;
 			z-index: 10;
 			display: flex;
@@ -103,6 +103,16 @@
 			gap: 10px;
 		}
 
+		#container7 {
+			position: absolute;
+			bottom: 10px;
+			left: 1116px;
+			z-index: 10;
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+		}
+
 		#layer1 {
 			display: block;
 			position: absolute;
@@ -154,6 +164,16 @@
 			height: 128px;
 		}
 		#layer6 {
+			display: block;
+			position: absolute;
+			bottom: 10px;
+			left: 0px;
+			z-index: 10;
+			border: 1px solid black;
+			width: 128px;
+			height: 128px;
+		}
+		#layer7 {
 			display: block;
 			position: absolute;
 			bottom: 10px;
@@ -228,6 +248,13 @@
 		<div id="layerDisplay6" style="margin-bottom: 1px; color: white; font-size: 12px;">Texture 6</div>
 		<button id="LayerBtn6" style="margin-bottom: 150px;"">Export Layer 6</button>
 	</div>	
+
+	<div id="container7">
+		<canvas id="layer7"></canvas>
+		<div id="layerDisplay7" style="margin-bottom: 1px; color: white; font-size: 12px;">Dead Stop map</div>
+		<button id="LayerBtn7" style="margin-bottom: 150px;"">Export Layer</button>
+	</div>
+
 
 	<script src="https://cdn.babylonjs.com/babylon.js"></script>
 	<script>
@@ -559,6 +586,7 @@
 					generateAlphaMapImage(alphaMap6, 6);
 				}
 
+				generateDeadMapImage(7);
 
 				// Once data is loaded, create the terrain
 				createTerrain();
@@ -975,8 +1003,125 @@
 
 				context.putImageData(imageData, 0, 0);
 				imgLayer.style.display = 'block'; // Show the grayscale canvas
-			}
+			}	
 
+			function generateDeadMapImage(layer) {
+					const canvas = document.getElementById(`layer${layer}`);
+					if (!canvas) return;
+					var DMap = [];
+					if(!mHeightOffset.length){
+						 DMap = mHeight;
+					}
+					else{
+						DMap = mHeightOffset;
+					}
+					const context = canvas.getContext('2d');
+					const scaledSize = 128;
+					const scaledCanvas = document.createElement('canvas');
+					scaledCanvas.width = scaledSize;
+					scaledCanvas.height = scaledSize;
+					const scaledContext = scaledCanvas.getContext('2d');
+
+					const minHeight = Math.min(...DMap);
+					const maxHeight = Math.max(...DMap);
+					const range = maxHeight - minHeight || 1; // Avoid division by zero
+
+					const scaledImageData = scaledContext.createImageData(scaledSize, scaledSize);
+
+					for (let i = 0; i < scaledSize; i++) {
+						for (let j = 0; j < scaledSize; j++) {
+							const x = (i / scaledSize) * size;
+							const y = (j / scaledSize) * size;
+
+							const x1 = Math.floor(x), y1 = Math.floor(y);
+							const x2 = Math.min(x1 + 1, size - 1);
+							const y2 = Math.min(y1 + 1, size - 1);
+
+							const v1 = DMap[y1 * size + x1];
+							const v2 = DMap[y1 * size + x2];
+							const v3 = DMap[y2 * size + x1];
+							const v4 = DMap[y2 * size + x2];
+
+							const interpolatedHeight = bilinearInter(x1, y1, x2, y2, x, y, v1, v2, v3, v4);
+							const normalizedHeight = (interpolatedHeight - minHeight) / range;
+							const grayValue = Math.floor(normalizedHeight * 255);
+							const ang = sNormal(x, y, DMap);
+
+							const color = getColorFromAngle(ang, grayValue);
+
+							const index = (j * scaledSize + i) * 4;
+							scaledImageData.data.set(color, index);
+						}
+					}
+
+					scaledContext.putImageData(scaledImageData, 0, 0);
+					context.drawImage(scaledCanvas, 0, 0, canvas.width, canvas.height);
+					canvas.style.display = 'block';
+				}
+				function exportDeadMapImage(layer, scale) {
+					const canvas = document.getElementById(`layer${layer}`);
+					if (!canvas) return;
+
+					var DMap = [];
+					if (!mHeightOffset.length) {
+						DMap = mHeight;
+					} else {
+						DMap = mHeightOffset;
+					}
+
+					const scaledSize = 256 * scale;
+					const scaledCanvas = document.createElement('canvas');
+					scaledCanvas.width = scaledSize;
+					scaledCanvas.height = scaledSize;
+					const scaledContext = scaledCanvas.getContext('2d');
+
+					const minHeight = Math.min(...DMap);
+					const maxHeight = Math.max(...DMap);
+					const range = maxHeight - minHeight || 1; // Avoid division by zero
+
+					const scaledImageData = scaledContext.createImageData(scaledSize, scaledSize);
+
+					for (let i = 0; i < scaledSize; i++) {
+						for (let j = 0; j < scaledSize; j++) {
+							const x = (i / scaledSize) * size;
+							const y = (j / scaledSize) * size;
+
+							const x1 = Math.floor(x), y1 = Math.floor(y);
+							const x2 = Math.min(x1 + 1, size - 1);
+							const y2 = Math.min(y1 + 1, size - 1);
+
+							const v1 = DMap[y1 * size + x1];
+							const v2 = DMap[y1 * size + x2];
+							const v3 = DMap[y2 * size + x1];
+							const v4 = DMap[y2 * size + x2];
+
+							const interpolatedHeight = bilinearInter(x1, y1, x2, y2, x, y, v1, v2, v3, v4);
+							const normalizedHeight = (interpolatedHeight - minHeight) / range;
+							const grayValue = Math.floor(normalizedHeight * 255);
+							const ang = sNormal(x1, y1, DMap);
+
+							const color = getColorFromAngle(ang, grayValue);
+
+							const index = (j * scaledSize + i) * 4;
+							scaledImageData.data.set(color, index);
+						}
+					}
+
+					scaledContext.putImageData(scaledImageData, 0, 0);
+
+					// Create a link to download the image
+					const link = document.createElement('a');
+					link.download = 'deadstopMap.png';
+					link.href = scaledCanvas.toDataURL('image/png');
+					link.click();
+				}
+
+			function getColorFromAngle(angle, grayValue) {
+				if (angle < 0.2) return [255, 0, 0, 255];      // Red
+				if (angle < 0.5) return [0, 255, 0, 255];      // Green
+				if (angle < 1) return [0, 0, 255, 255];        // Blue
+				return [grayValue, grayValue, grayValue, 255]; // Grayscale
+			}
 			
 		function generateGreyscaleImage() {
 			const greyscaleCanvas = document.getElementById('greyscaleCanvas');
@@ -1486,13 +1631,13 @@
 			var fixCount = 0;
 			var fixCountM = 0;
 			var fixCountF = 0;
-			for (let pass = 1; pass < 50; pass++) {
+			for (let pass = 1; pass < 100; pass++) {
 				nextPass = 0;
 				fixCount = 0;
 				mrx = 0;
 				fixCountM = 0;
 				fixCountF = 0;
-				var minAng = (pass === 1) ? 1 : 0.5;// first pas adjust verts by 1 degree then on other passes loose the tollerance  to reduce passes
+				var minAng = 1.5;// first pas adjust verts by 1 degree then on other passes loose the tollerance  to reduce passes
 				for (let y = 0; y < 255; y++) {
 					for (let x = 0; x < 255; x++) {
 						var he = tempMap[x + (y * 256)];
@@ -1508,14 +1653,14 @@
 							if (terAngFlip <= minAng) {
 								fixCountF++;
 							}
-							for (let z = 1; z < 100; z++) {
+							for (let z = 1; z < 200; z++) {
 								if (mrx % 2 === 0) {
-									tempMap[x + (y * 256)] = he + (0.1397 * z);
+									tempMap[x + (y * 256)] = he + (0.1 * z);
 								}
 								else {
-									tempMap[x + (y * 256)] = he - (0.1397 * z);
+									tempMap[x + (y * 256)] = he - (0.1 * z);
 									if (sNormalFlip(x, y, tempMap) <= minAng) {
-										tempMap[(x + 1) + ((y) * 256)] = he + (0.1397 * z);
+										tempMap[(x + 1) + ((y) * 256)] = he + (0.1 * z);
 									}
 								}
 								var rx = sNormal(x, y, tempMap);
@@ -1561,6 +1706,10 @@
 		document.getElementById('LayerBtn6').addEventListener('click', function () {
 				const scale = parseInt(document.getElementById('scaleSlider').value, 10);
 				exportAlphaMap(6, scale);
+			})
+		document.getElementById('LayerBtn7').addEventListener('click', function () {
+				const scale = parseInt(document.getElementById('scaleSlider').value, 10);
+				exportDeadMapImage(7, scale);
 			})
       
 		document.getElementById('exportTerFixButton').addEventListener('click', exportTerFlatSpot);
@@ -1678,6 +1827,7 @@
 					redrawGreyscaleImage(context);
 					updateHeightmapWithOffset();
 					createTerrain2(); 
+					generateDeadMapImage(7);
 				}
 			});
 
