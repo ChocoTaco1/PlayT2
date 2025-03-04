@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Babylon.js Terrain Loader</title>
+   <style>
+      body {
+         margin: 0;
+         overflow: hidden;
+      }
+
+      #renderCanvas {
+         width: 100vw;
+         height: 100vh;
+         touch-action: none;
+      }
+
+      #buttonContainer {
+         position: absolute;
+         top: 10px;
+         left: 10px;
+         z-index: 10;
+         display: flex;
+         flex-direction: column;
+         gap: 10px;
+      }
+
+      #greyscaleCanvas {
+         display: block;
+         position: absolute;
+         bottom: 10px;
+         left: 10px;
+         z-index: 10;
+         border: 1px solid black;
+         width: 256px;
+         height: 256px;
+      }
+   </style>
+</head>
+
+<body>
+   <div id="buttonContainer">
+      <!-- Terrain Controls -->
+      <details open>
+         <summary style="color: white; cursor: pointer;">Terrain Controls</summary>
+         <label style="color: white;">Import Image (256x256 PNG)</label>
+         <input type="file" id="fileInput" accept="image/png" />
+         <button id="normalizeButton">Normalize Image</button>
+         <button id="exportTerButton">Export Ter File</button>
+      </details>
+   
+      <!-- Height Adjustments -->
+      <details>
+         <summary style="color: white; cursor: pointer;">Height Adjustments</summary>
+         <label for="minHeightSlider" style="color: white;">Min Height: <span id="minHeightValue">50</span></label>
+         <input type="range" id="minHeightSlider" min="10" max="1000" value="50" />
+         <input type="number" id="minHeightInput" min="10" max="1000" value="50" />
+   
+         <label for="maxHeightSlider" style="color: white;">Max Height: <span id="maxHeightValue">200</span></label>
+         <input type="range" id="maxHeightSlider" min="10" max="1000" value="200" />
+         <input type="number" id="maxHeightInput" min="10" max="1000" value="200" />
+      </details>
+   
+      <!-- Transformations -->
+      <details>
+         <summary style="color: white; cursor: pointer;">Transformations</summary>
+         <button id="rotateLeftButton">Rotate Left</button>
+         <button id="rotateRightButton">Rotate Right</button>
+         <button id="flipVerticalButton">Flip Vertical</button>
+         <button id="flipHorizontalButton">Flip Horizontal</button>
+      </details>
+   
+      <!-- Brush Settings -->
+      <details>
+         <summary style="color: white; cursor: pointer;">Brush Settings</summary>
+         <label for="blurAmountSlider" style="color: white;">Blur Amount: <span id="blurAmountValue">0.5</span></label>
+         <input type="range" id="blurAmountSlider" min="0" max="1" step="0.001" value="0.5" />
+   
+         <label for="blurRadiusSlider" style="color: white;">Brush Size: <span id="blurRadiusValue">5</span></label>
+         <input type="range" id="blurRadiusSlider" min="1" max="10" step="1" value="5" />
+   
+         <button id="toggleBlurBrushButton">Toggle Blur Brush</button>
+      </details>
+   
+      <!-- Info -->
+      <details>
+         <summary style="color: white; cursor: pointer;">Info</summary>
+         <label style="color: white;">Vertical Distance: <span id="distanceValue">0</span> units</label>
+         <label style="color: white;">Max Position: <span id="maxPosition">(0, 0, 0)</span></label>
+         <label style="color: white;">Min Position: <span id="minPosition">(0, 0, 0)</span></label>
+      </details>
+   </div>
+
+
+   <canvas id="renderCanvas"></canvas>
+   <canvas id="greyscaleCanvas" width="256" height="256"></canvas>
+
+   <script src="https://cdn.babylonjs.com/babylon.js"></script>
+   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+   <script>
+      const canvas = document.getElementById('renderCanvas');
+      const engine = new BABYLON.Engine(canvas, true);
+      const scene = new BABYLON.Scene(engine);
+
+     // const camera = new BABYLON.ArcRotateCamera("camera1", Math.PI / 2, Math.PI / 3, 2048, BABYLON.Vector3.Zero(), scene);
+      let camera = new BABYLON.FreeCamera("camera1", new BABYLON.Vector3(0, 1024, -2048), scene);
+      camera.setTarget(BABYLON.Vector3.Zero());
+      camera.attachControl(canvas, true);
+     camera.inputs.removeByType("FreeCameraMouseInput");
+      var speed = 5.5;
+      canvas.addEventListener('wheel', function (event) {
+         // Set how much to change the camera speed by
+         let zoomSpeed = 0.1;
+
+         // If the wheel is scrolled up (away from you), increase the speed
+         if (event.deltaY < 0) {
+            speed += zoomSpeed;
+         }
+         // If the wheel is scrolled down (toward you), decrease the speed
+         else {
+            speed = Math.max(zoomSpeed,  speed - zoomSpeed); // Prevent negative speed
+         }
+
+         // Optionally, you can log the speed to check
+         console.log('Camera Speed:', speed);
+
+         // Prevent the default action (page scroll) when using the wheel
+         event.preventDefault();
+      });
+
+      const keys = {};
+      scene.onKeyboardObservable.add((kbInfo) => {
+         keys[kbInfo.event.key] = kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN;
+      });
+
+      scene.onBeforeRenderObservable.add(() => {
+            if (keys["w"] || keys["W"]) {
+               camera.position.addInPlace(camera.getDirection(BABYLON.Axis.Z).scale(speed));
+            }
+            if (keys["s"] || keys["S"]) {
+               camera.position.addInPlace(camera.getDirection(BABYLON.Axis.Z).scale(-speed));
+            }
+            if (keys["a"] || keys["A"]) {
+               camera.position.addInPlace(camera.getDirection(BABYLON.Axis.X).scale(-speed));
+            }
+            if (keys["d"] || keys["D"]) {
+               camera.position.addInPlace(camera.getDirection(BABYLON.Axis.X).scale(speed));
+            }
+         });
+
+         // Enable right mouse button for looking around
+         let isRightMouseDown = false;
+         let isLeftMouseDown = false;
+         scene.onPointerObservable.add((pointerInfo) => {
+            switch (pointerInfo.type) {
+               case BABYLON.PointerEventTypes.POINTERDOWN:
+                  if (pointerInfo.event.button === 2) {
+                     isRightMouseDown = true;
+                  } else if (pointerInfo.event.button === 0) {
+                     // Handle left mouse button actions
+                     isLeftMouseDown = true;
+                     if(isBlurMode){
+                         applyBlurAtPointer(pointerInfo.event); 
+                     }
+                  }
+                  break;
+               case BABYLON.PointerEventTypes.POINTERUP:
+                  if (pointerInfo.event.button === 2) {
+                     isRightMouseDown = false;
+                  }
+                  else if (pointerInfo.event.button === 0) {
+                     isLeftMouseDown = false;
+                  }
+                  break;
+               case BABYLON.PointerEventTypes.POINTERMOVE:
+                  if (isRightMouseDown) {
+                     camera.rotation.y += pointerInfo.event.movementX * 0.002;
+                     camera.rotation.x += pointerInfo.event.movementY * 0.002;
+                  }
+                  else if (isLeftMouseDown) {
+                     //console.log("Left mouse move:", pointerInfo.event.movementX, pointerInfo.event.movementY);
+                      if (isBlurMode) {
+                        applyBlurAtPointer(pointerInfo.event);
+                     }
+                  }
+                  break;
+            }
+         });
+
+         // Function to handle left mouse button click actions
+         function handleLeftClick(pickInfo) {
+            return;
+         }
+
+
+      camera.wheelDeltaPercentage = 0.005;
+      const light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0.0, 1.0, 0.0), scene);
+      light.intensity = 0.75;
+
+      let indicatorMaterial = new BABYLON.StandardMaterial("indicatorMaterial", scene);
+      indicatorMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
+      indicatorMaterial.alpha = 0.23;
+      indicatorMaterial.wireframe = true;
+
+      let brushIndicator = BABYLON.MeshBuilder.CreateSphere("brushIndicator", { diameter: 8, segments: 8 }, scene);
+      brushIndicator.material = indicatorMaterial;
+      brushIndicator.isPickable = false;
+      brushIndicator.scaling.set(5 * 2, 5 * 2, 5 * 2);
+      brushIndicator.setEnabled(false);
+
+      const size = 256;
+      const scaleFactor = 8;
+      let mHeight = [];
+      let originalHeightMap = [];
+      let map;
+      let minHeight = 50;
+      let maxHeight = 200;
+      let highestPoint = { x: 0, y: 0, z: 0, height: -Infinity };
+      let lowestPoint = { x: 0, y: 0, z: 0, height: Infinity };
+      let exportFileName = 'terrain';
+
+      function createTerrain() {
+         // Reset the highest and lowest points
+         highestPoint = { x: 0, y: 0, z: 0, height: -Infinity };
+         lowestPoint = { x: 0, y: 0, z: 0, height: Infinity };
+
+         const mapSubX = size; // e.g., 256
+         const mapSubZ = size; // e.g., 256
+         const vertices = [];
+         const indices = [];
+         let normals = [];
+
+         // Generate vertices and update highest/lowest points
+         for (let l = 0; l < mapSubZ; l++) {
+            for (let w = 0; w < mapSubX; w++) {
+               const x = -(w - mapSubX * 0.5) * 8; // Flipped on X-axis
+               const z = (l - mapSubZ * 0.5) * 8;    // 8m apart
+               const y = mHeight[l * mapSubX + w];     // Height data
+               vertices.push(x, y, z);
+
+               // Update highest and lowest points
+               if (y > highestPoint.height) {
+                  highestPoint = { x: x, y: y, z: z, height: y };
+               }
+               if (y < lowestPoint.height) {
+                  lowestPoint = { x: x, y: y, z: z, height: y };
+               }
+            }
+         }
+
+         // Generate triangle indices (clockwise winding order)
+         for (let l = 0; l < mapSubZ - 1; l++) {
+            for (let w = 0; w < mapSubX - 1; w++) {
+               const topLeft = l * mapSubX + w;
+               const topRight = topLeft + 1;
+               const bottomLeft = (l + 1) * mapSubX + w;
+               const bottomRight = bottomLeft + 1;
+               indices.push(bottomLeft, topRight, topLeft);      // First triangle
+               indices.push(bottomLeft, bottomRight, topRight);    // Second triangle
+            }
+         }
+
+         // Compute normals for smooth shading
+         normals = [];
+         BABYLON.VertexData.ComputeNormals(vertices, indices, normals);
+
+         if (map) {
+            // Update existing mesh data to avoid flashing
+            map.updateVerticesData(BABYLON.VertexBuffer.PositionKind, vertices, true);
+            map.updateVerticesData(BABYLON.VertexBuffer.NormalKind, normals, true);
+            // If your indices change, update them too:
+            // map.updateVerticesData(BABYLON.VertexBuffer.IndexKind, indices, true);
+         } else {
+            // Create a new mesh if it doesn't exist
+            map = new BABYLON.Mesh("terrain", scene);
+            const vertexData = new BABYLON.VertexData();
+            vertexData.positions = vertices;
+            vertexData.indices = indices;
+            vertexData.normals = normals;
+            vertexData.applyToMesh(map, true); // 'true' makes it updatable
+
+            // Create and assign a material
+            flatMaterial = new BABYLON.StandardMaterial("flatMaterial", scene);
+            flatMaterial.wireframe = false;
+            flatMaterial.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+            flatMaterial.specularColor = new BABYLON.Color3(0.0, 0.0, 0.0);
+            flatMaterial.emissiveColor = new BABYLON.Color3(0, 0, 0);
+            map.material = flatMaterial;
+         }
+
+         // Update any additional visuals
+         generateGreyscaleImage();
+         visualizeExtremes();
+      }
+
+
+
+
+      function resetSliders() {
+         // Reset sliders to their default values
+
+         document.getElementById('minHeightSlider').value = 50;
+         document.getElementById('minHeightInput').value = 50;
+         document.getElementById('maxHeightSlider').value = 200;
+         document.getElementById('maxHeightInput').value = 200;
+         document.getElementById('blurAmountSlider').value = 0.5;
+
+         // Update the text values that are associated with the sliders
+         document.getElementById('minHeightValue').textContent = '50';
+         document.getElementById('maxHeightValue').textContent = '200';
+         document.getElementById('blurAmountValue').textContent = '0.5';
+         minHeight = 50;
+         maxHeight = 200;
+      }
+      function loadPngFile(file) {
+         exportFileName = file.name.split('.')[0];
+         const reader = new FileReader();
+         reader.onload = function (e) {
+            const img = new Image();
+            img.onload = function () {
+               if (img.width !== 256 || img.height !== 256) {
+                  alert("Image must be 256x256 pixels.");
+                  return;
+               }
+               resetSliders();
+
+               const greyscaleCanvas = document.createElement('canvas');
+               greyscaleCanvas.width = size;
+               greyscaleCanvas.height = size;
+               const context = greyscaleCanvas.getContext('2d');
+               context.drawImage(img, 0, 0, size, size);
+               const imageData = context.getImageData(0, 0, size, size);
+               mHeight = [];
+               for (let i = 0; i < imageData.data.length; i += 4) {
+                  var greenValue = imageData.data[i + 1]; // Use the green channel value
+                  var height = greenValue / 255 * (maxHeight - minHeight) + minHeight;
+                  mHeight.push(height);
+               }
+               // Save a copy so slider adjustments always start from the original data
+               originalHeightMap = mHeight.slice();
+               createTerrain();
+
+            };
+            img.src = e.target.result;
+         };
+         reader.readAsDataURL(file);
+      }
+
+
+      function rescaleHeightmap() {
+         const min = Math.min(...mHeight);
+         const max = Math.max(...mHeight);
+         const range = maxHeight - minHeight;
+
+         for (let i = 0; i < mHeight.length; i++) {
+            mHeight[i] = ((mHeight[i] - min) / (max - min)) * range + minHeight;
+         }
+         originalHeightMap = mHeight.slice();
+         createTerrain();
+      }
+
+      function normalizeHeightmap() {
+         const min = Math.min(...mHeight);
+         const max = Math.max(...mHeight);
+
+         for (let i = 0; i < mHeight.length; i++) {
+            mHeight[i] = ((mHeight[i] - min) / (max - min)) * 255;
+         }
+         rescaleHeightmap();
+      }
+
+      function generateGreyscaleImage() {
+         const greyscaleCanvas = document.getElementById('greyscaleCanvas');
+         const context = greyscaleCanvas.getContext('2d');
+         const imageData = context.createImageData(size, size);
+         const minHeight = Math.min(...mHeight);
+         const maxHeight = Math.max(...mHeight);
+
+         for (let i = 0; i < mHeight.length; i++) {
+            const normalizedHeight = (mHeight[i] - minHeight) / (maxHeight - minHeight);
+            const grayValue = Math.floor(normalizedHeight * 255);
+            imageData.data[i * 4] = grayValue;
+            imageData.data[i * 4 + 1] = grayValue;
+            imageData.data[i * 4 + 2] = grayValue;
+            imageData.data[i * 4 + 3] = 255;
+         }
+
+         context.putImageData(imageData, 0, 0);
+         greyscaleCanvas.style.display = 'block';
+      }
+
+      function visualizeExtremes() {
+         scene.meshes.filter(m => m.name === "extreme_marker" || m.name === "extreme_line").forEach(m => m.dispose());
+
+         const highestMarker = BABYLON.MeshBuilder.CreateSphere("extreme_marker", { diameter: 20 }, scene);
+         highestMarker.position = new BABYLON.Vector3(highestPoint.x, highestPoint.y, highestPoint.z);
+         highestMarker.material = new BABYLON.StandardMaterial("highMat", scene);
+         highestMarker.material.diffuseColor = new BABYLON.Color3(1, 0, 0);
+
+         const lowestMarker = BABYLON.MeshBuilder.CreateSphere("extreme_marker", { diameter: 20 }, scene);
+         lowestMarker.position = new BABYLON.Vector3(lowestPoint.x, lowestPoint.y, lowestPoint.z);
+         lowestMarker.material = new BABYLON.StandardMaterial("lowMat", scene);
+         lowestMarker.material.diffuseColor = new BABYLON.Color3(0, 0, 1);
+
+         const highestMarker2 = BABYLON.MeshBuilder.CreateSphere("extreme_marker", { diameter: 20 }, scene);
+         highestMarker2.position = new BABYLON.Vector3(0, highestPoint.y, 0);
+         highestMarker2.material = new BABYLON.StandardMaterial("highMat", scene);
+         highestMarker2.material.diffuseColor = new BABYLON.Color3(1, 0, 0);
+
+         const lowestMarker2 = BABYLON.MeshBuilder.CreateSphere("extreme_marker", { diameter: 20 }, scene);
+         lowestMarker2.position = new BABYLON.Vector3(0, lowestPoint.y, 0);
+         lowestMarker2.material = new BABYLON.StandardMaterial("lowMat", scene);
+         lowestMarker2.material.diffuseColor = new BABYLON.Color3(0, 0, 1);
+
+         const line = BABYLON.MeshBuilder.CreateLines("extreme_line", {
+            points: [
+               new BABYLON.Vector3(highestPoint.x, highestPoint.y, highestPoint.z),
+               new BABYLON.Vector3(lowestPoint.x, lowestPoint.y, lowestPoint.z)
+            ]
+         }, scene);
+         line.color = new BABYLON.Color3(0, 1, 0);
+
+         const line2 = BABYLON.MeshBuilder.CreateLines("extreme_line", {
+            points: [
+               new BABYLON.Vector3(0, highestPoint.y, 0),
+               new BABYLON.Vector3(0, lowestPoint.y, 0)
+            ]
+         }, scene);
+         line2.color = new BABYLON.Color3(0, 1, 0);
+
+         const verticalDistance = Math.abs(highestPoint.y - lowestPoint.y);
+         document.getElementById('distanceValue').textContent = verticalDistance.toFixed(2);
+         document.getElementById('maxPosition').textContent = `(${highestPoint.x.toFixed(2)}, ${highestPoint.z.toFixed(2)}, ${highestPoint.y.toFixed(2)})`;
+         document.getElementById('minPosition').textContent = `(${lowestPoint.x.toFixed(2)}, ${lowestPoint.z.toFixed(2)}, ${lowestPoint.y.toFixed(2)})`;
+      }
+
+      function rotateLeft() {
+         const newHeight = new Array(size * size).fill(0);
+         for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+               newHeight[(size - x - 1) * size + y] = mHeight[y * size + x];
+            }
+         }
+         mHeight = newHeight;
+         rescaleHeightmap();
+      }
+
+      function rotateRight() {
+         const newHeight = new Array(size * size).fill(0);
+         for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+               newHeight[x * size + (size - y - 1)] = mHeight[y * size + x];
+            }
+         }
+         mHeight = newHeight;
+         rescaleHeightmap();
+      }
+
+      function flipVertical() {
+         const newHeight = new Array(size * size).fill(0);
+         for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+               newHeight[(size - y - 1) * size + x] = mHeight[y * size + x];
+            }
+         }
+         mHeight = newHeight;
+         rescaleHeightmap();
+      }
+
+      function flipHorizontal() {
+         const newHeight = new Array(size * size).fill(0);
+         for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+               newHeight[y * size + (size - x - 1)] = mHeight[y * size + x];
+            }
+         }
+         mHeight = newHeight;
+         rescaleHeightmap();
+      }
+      function writeString(dataView, offset, string) {
+         dataView.setUint8(offset, string.length);
+         offset++;
+         for (let i = 0; i < string.length; i++) {
+            dataView.setUint8(offset, string.charCodeAt(i));
+            offset++;
+         }
+         return offset;
+      }
+      //.ter format
+      //int8 version number
+      //height data 256 * 256 1d array  of int16 and converted to a float with fixedToFloat or terHeight = (height * 0.03125);
+      //terrain material map array 256 * 256 1d array of int8, not sure if this is all that important
+      //texture name array first byte string size then  the string with a total of 8 textures
+      //8 arrays of 256 * 256 of int8  alpha maps for each texture 
+      function exportTer() {
+         var size = 256;
+         //          /v   // terrain size      //????         //Mat Names   //Texture Map 1  //Texture Map 2
+         var bufferSize = 1 + ((size * size) * 2) + (size * size) + 23 + 23 + 6 + (size * size) + (size * size);
+         const buffer = new ArrayBuffer(bufferSize);
+         var dataViewEX = new DataView(buffer);
+
+
+         var newHeight = new Array(size * size).fill(0);
+         for (let y = 0; y < size; y++) { // auto flip are export do to y being forward 
+            for (let x = 0; x < size; x++) {
+               newHeight[(size - y - 1) * size + x] = mHeight[y * size + x];
+            }
+         }
+
+         let off = 0;// skip the version 
+         dataViewEX.setUint8(off, 3);
+         off++;
+         for (let i = 0; i < size * size; i++) {
+            var height = Math.floor(newHeight[i] / 0.03125);
+            dataViewEX.setUint16(off, height, true); // true for little-endian
+            off += 2;
+         }
+
+         for (let i = 0; i < size * size; i++) {
+            dataViewEX.setUint8(off, 0);
+            off++;
+         }
+
+         off = writeString(dataViewEX, off, 'DesertWorld.SandOrange');
+         off = writeString(dataViewEX, off, 'DesertWorld.RockSmooth');
+
+         dataViewEX.setUint8(off, 0);
+         off++;
+         dataViewEX.setUint8(off, 0);
+         off++;
+         dataViewEX.setUint8(off, 0);
+         off++;
+         dataViewEX.setUint8(off, 0);
+         off++;
+         dataViewEX.setUint8(off, 0);
+         off++;
+         dataViewEX.setUint8(off, 0);
+         off++;
+
+         for (let i = 0; i < size * size; i++) {
+            dataViewEX.setUint8(off, 255);
+            off++;
+         }
+         for (let i = 0; i < size * size; i++) {
+            dataViewEX.setUint8(off, 128);
+            off++;
+         }
+         //console.log('finaloffset' + off + 'buffer size' + bufferSize);
+         const blob = new Blob([dataViewEX.buffer], { type: "application/octet-stream" });
+         const link = document.createElement('a');
+         link.href = URL.createObjectURL(blob);
+         link.download = exportFileName + '.ter';
+         link.click();
+      }
+
+
+       // --- Blur Brush Implementation ---
+         let isBlurMode = false;
+         var brushRadius = 5; // in grid cells
+      // Global kernel for 3x3 blur (Gaussian-like)
+         const kernel = [
+            [1, 2, 1],
+            [2, 4, 2],
+            [1, 2, 1]
+         ];
+         const kernelSum = 16;
+         
+         // Toggle blur brush mode (detaches camera control when active)
+         document.getElementById('toggleBlurBrushButton').addEventListener('click', function () {
+            isBlurMode = !isBlurMode;
+            if (isBlurMode) {
+               this.textContent = "Exit Blur Brush";
+               //console.log("Blur brush mode enabled");
+               brushIndicator.setEnabled(true);
+            } else {
+               this.textContent = "Toggle Blur Brush";
+               //console.log("Blur brush mode disabled");
+               brushIndicator.setEnabled(false);
+            }
+         });
+         
+         // Converts the pointer position to heightmap grid coordinates and applies blur.
+         function applyBlurAtPointer(e) {
+              const pickInfo = scene.pick(e.clientX, e.clientY, function (mesh) {
+               return mesh === map;
+            });
+            if (pickInfo && pickInfo.hit) {
+               const pickedPoint = pickInfo.pickedPoint;
+               brushIndicator.position.x = pickedPoint.x;
+               brushIndicator.position.y = pickedPoint.y + 0.1; // adjust as needed
+               brushIndicator.position.z = pickedPoint.z;
+               // Convert picked point (x,z) to grid indices.
+               const col = Math.round(128 - (pickedPoint.x / 8));
+               const row = Math.round((pickedPoint.z / 8) + 128);
+               if (col < 0 || col >= size || row < 0 || row >= size) return;
+               applyBlurAt(row, col);
+               createTerrain(); // refresh the mesh and greyscale view
+            }
+         }
+
+         // Applies a 3x3 blur using the global kernel to all cells within a square around the (row, col)
+   function applyBlurAt(centerRow, centerCol) {
+      let newHeights = mHeight.slice();
+      const blurFactor = parseFloat(document.getElementById("blurAmountSlider").value); // 0 to 1
+
+      // Iterate over a square, but only apply blur if inside the brush circle
+      for (let i = Math.max(1, centerRow - brushRadius); i <= Math.min(size - 2, centerRow + brushRadius); i++) {
+         for (let j = Math.max(1, centerCol - brushRadius); j <= Math.min(size - 2, centerCol + brushRadius); j++) {
+
+            // Distance check for circular brush
+            let distance = Math.sqrt((i - centerRow) ** 2 + (j - centerCol) ** 2);
+            if (distance > brushRadius) continue;
+
+            // Apply kernel blur
+            let sum = 0;
+            for (let ki = -1; ki <= 1; ki++) {
+               for (let kj = -1; kj <= 1; kj++) {
+                  sum += mHeight[(i + ki) * size + (j + kj)] * kernel[ki + 1][kj + 1];
+               }
+            }
+            let blurredValue = sum / kernelSum;
+            let originalValue = mHeight[i * size + j];
+            newHeights[i * size + j] = originalValue * (1 - blurFactor) + blurredValue * blurFactor;
+         }
+      }
+
+      // Apply the new heights only in the blurred region
+      for (let i = Math.max(1, centerRow - brushRadius); i <= Math.min(size - 2, centerRow + brushRadius); i++) {
+         for (let j = Math.max(1, centerCol - brushRadius); j <= Math.min(size - 2, centerCol + brushRadius); j++) {
+            let distance = Math.sqrt((i - centerRow) ** 2 + (j - centerCol) ** 2);
+            if (distance > brushRadius) continue;
+            mHeight[i * size + j] = newHeights[i * size + j];
+         }
+      }
+   }
+
+      // --- End Blur Brush Implementation ---
+
+       document.addEventListener('contextmenu', function (event) {
+            event.preventDefault(); // Disable right-click context menu
+            console.log('menu');
+         }); 
+
+      document.getElementById('blurAmountSlider').addEventListener('input', function () {
+         document.getElementById('blurAmountValue').textContent = this.value;
+         if (originalHeightMap.length > 0) {
+            createTerrain();
+         }
+      });
+
+      document.getElementById('blurRadiusSlider').addEventListener('input', function () {
+         document.getElementById('blurRadiusValue').textContent = this.value;
+         if (originalHeightMap.length > 0) {
+            brushRadius = this.value;
+             brushIndicator.scaling.set(brushRadius*2, brushRadius*2, brushRadius*2);
+         }
+      });
+
+      document.getElementById('exportTerButton').addEventListener('click', exportTer);
+
+      document.getElementById('normalizeButton').addEventListener('click', function () {
+         normalizeHeightmap();
+      });
+
+      document.getElementById('rotateLeftButton').addEventListener('click', function () {
+         rotateLeft();
+      });
+
+      document.getElementById('rotateRightButton').addEventListener('click', function () {
+         rotateRight();
+      });
+
+      document.getElementById('flipVerticalButton').addEventListener('click', function () {
+         flipVertical();
+      });
+
+      document.getElementById('flipHorizontalButton').addEventListener('click', function () {
+         flipHorizontal();
+      });
+
+      document.getElementById('minHeightSlider').addEventListener('input', function () {
+         let newMin = parseInt(this.value, 10);
+         if (newMin + 5 > maxHeight) {
+            newMin = maxHeight - 5;
+            this.value = newMin;
+         }
+         minHeight = newMin;
+         document.getElementById('minHeightValue').textContent = newMin;
+         document.getElementById('minHeightInput').value = newMin;
+         rescaleHeightmap();
+      });
+
+      document.getElementById('maxHeightSlider').addEventListener('input', function () {
+         let newMax = parseInt(this.value, 10);
+         if (newMax - 5 < minHeight) {
+            newMax = minHeight + 5;
+            this.value = newMax;
+         }
+         maxHeight = newMax;
+         document.getElementById('maxHeightValue').textContent = newMax;
+         document.getElementById('maxHeightInput').value = newMax;
+         rescaleHeightmap();
+      });
+
+      document.getElementById('minHeightInput').addEventListener('input', function () {
+         let newMin = parseInt(this.value, 10);
+         if (newMin + 5 > maxHeight) {
+            newMin = maxHeight - 5;
+            this.value = newMin;
+         }
+         minHeight = newMin;
+         document.getElementById('minHeightValue').textContent = newMin;
+         document.getElementById('minHeightSlider').value = newMin;
+         rescaleHeightmap();
+      });
+
+      document.getElementById('maxHeightInput').addEventListener('input', function () {
+         let newMax = parseInt(this.value, 10);
+         if (newMax - 5 < minHeight) {
+            newMax = minHeight + 5;
+            this.value = newMax;
+         }
+         maxHeight = newMax;
+         document.getElementById('maxHeightValue').textContent = newMax;
+         document.getElementById('maxHeightSlider').value = newMax;
+         rescaleHeightmap();
+      });
+
+
+      document.getElementById('fileInput').addEventListener('change', function (event) {
+         const file = event.target.files[0];
+         if (file) {
+            mHeight = [];
+            if (map) {
+               map.dispose();
+               map = null;
+            }
+            loadPngFile(file);
+         } else {
+            console.error("No file selected.");
+         }
+      });
+
+      engine.runRenderLoop(function () {
+         scene.render();
+      });
+
+      window.addEventListener('resize', function () {
+         engine.resize();
+      });
+   </script>
+</body>
+
+</html>
